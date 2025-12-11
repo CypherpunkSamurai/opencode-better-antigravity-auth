@@ -100,6 +100,14 @@ jobs:
         if: steps.determine.outputs.changed == 'true' && steps.determine.outputs.tag_exists == 'false'
         run: npm run build
 
+      - name: Verify build artifacts
+        if: steps.determine.outputs.changed == 'true' && steps.determine.outputs.tag_exists == 'false'
+        run: |
+          set -euo pipefail
+          [ -f dist/index.js ] || { echo "dist/index.js missing" >&2; exit 1; }
+          [ -f dist/index.d.ts ] || { echo "dist/index.d.ts missing" >&2; exit 1; }
+          [ -d dist/src ] || { echo "dist/src/ missing" >&2; exit 1; }
+
       - name: Generate release notes
         if: steps.determine.outputs.changed == 'true' && steps.determine.outputs.tag_exists == 'false'
         id: release_notes
