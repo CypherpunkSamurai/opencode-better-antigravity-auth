@@ -335,7 +335,7 @@ export OPENCODE_ANTIGRAVITY_DEBUG=1
 - **Level 1 (`1` or `true`):** Basic logging of URLs, headers, status codes, and request/response previews.
 - **Level 2 (`2` or `verbose`):** Verbose logging including full request and response bodies (up to 50KB).
 - **TUI Reasoning View:** Debug logs are injected into the model's "thinking/reasoning" blocks in the Opencode TUI (requires thinking-capable models).
-- **Log Files:** Logs are written to `antigravity-debug-<timestamp>.log` in the current directory.
+- **Log Files:** Logs are written to `~/.config/opencode/antigravity-logs/antigravity-debug-<timestamp>.log`. Override with `OPENCODE_ANTIGRAVITY_LOG_DIR`.
 - **Auto-Stripping:** Injected debug blocks are automatically stripped from outgoing requests to prevent leaking into conversation history.
 
 ## Development

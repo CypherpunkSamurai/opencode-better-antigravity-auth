@@ -3,6 +3,14 @@ import { getCachedVersion, getLocalDevVersion, findPluginEntry, getLatestVersion
 import { invalidatePackage } from "./cache";
 import { PACKAGE_NAME } from "./constants";
 
+const DEBUG = process.env.OPENCODE_ANTIGRAVITY_DEBUG === "1" || process.env.OPENCODE_ANTIGRAVITY_DEBUG === "2" || process.env.OPENCODE_ANTIGRAVITY_DEBUG === "true" || process.env.OPENCODE_ANTIGRAVITY_DEBUG === "verbose";
+
+function debugLog(message: string): void {
+  if (DEBUG) {
+    console.log(message);
+  }
+}
+
 interface PluginClient {
   tui: {
     showToast(options: {
@@ -53,12 +61,12 @@ export function createAutoUpdateCheckerHook(
           if (showStartupToast) {
             showLocalDevToast(client, localDevVersion).catch(() => {});
           }
-          console.log("[auto-update-checker] Local development mode");
+          debugLog("[auto-update-checker] Local development mode");
           return;
         }
 
         runBackgroundUpdateCheck(client, directory, autoUpdate).catch((err) => {
-          console.log("[auto-update-checker] Background update check failed:", err);
+          debugLog(`[auto-update-checker] Background update check failed: ${err}`);
         });
       }, 0);
     },
@@ -72,33 +80,33 @@ async function runBackgroundUpdateCheck(
 ): Promise<void> {
   const pluginInfo = findPluginEntry(directory);
   if (!pluginInfo) {
-    console.log("[auto-update-checker] Plugin not found in config");
+    debugLog("[auto-update-checker] Plugin not found in config");
     return;
   }
 
   const cachedVersion = getCachedVersion();
   const currentVersion = cachedVersion ?? pluginInfo.pinnedVersion;
   if (!currentVersion) {
-    console.log("[auto-update-checker] No version found (cached or pinned)");
+    debugLog("[auto-update-checker] No version found (cached or pinned)");
     return;
   }
 
   const latestVersion = await getLatestVersion();
   if (!latestVersion) {
-    console.log("[auto-update-checker] Failed to fetch latest version");
+    debugLog("[auto-update-checker] Failed to fetch latest version");
     return;
   }
 
   if (currentVersion === latestVersion) {
-    console.log("[auto-update-checker] Already on latest version");
+    debugLog("[auto-update-checker] Already on latest version");
     return;
   }
 
-  console.log(`[auto-update-checker] Update available: ${currentVersion} → ${latestVersion}`);
+  debugLog(`[auto-update-checker] Update available: ${currentVersion} → ${latestVersion}`);
 
   if (!autoUpdate) {
     await showUpdateAvailableToast(client, latestVersion);
-    console.log("[auto-update-checker] Auto-update disabled, notification only");
+    debugLog("[auto-update-checker] Auto-update disabled, notification only");
     return;
   }
 
@@ -107,7 +115,7 @@ async function runBackgroundUpdateCheck(
     if (updated) {
       invalidatePackage(PACKAGE_NAME);
       await showAutoUpdatedToast(client, currentVersion, latestVersion);
-      console.log(`[auto-update-checker] Config updated: ${pluginInfo.entry} → ${PACKAGE_NAME}@${latestVersion}`);
+      debugLog(`[auto-update-checker] Config updated: ${pluginInfo.entry} → ${PACKAGE_NAME}@${latestVersion}`);
     } else {
       await showUpdateAvailableToast(client, latestVersion);
     }
@@ -128,7 +136,7 @@ async function showUpdateAvailableToast(client: PluginClient, latestVersion: str
       },
     })
     .catch(() => {});
-  console.log(`[auto-update-checker] Update available toast shown: v${latestVersion}`);
+  debugLog(`[auto-update-checker] Update available toast shown: v${latestVersion}`);
 }
 
 async function showAutoUpdatedToast(client: PluginClient, oldVersion: string, newVersion: string): Promise<void> {
@@ -142,7 +150,7 @@ async function showAutoUpdatedToast(client: PluginClient, oldVersion: string, ne
       },
     })
     .catch(() => {});
-  console.log(`[auto-update-checker] Auto-updated toast shown: v${oldVersion} → v${newVersion}`);
+  debugLog(`[auto-update-checker] Auto-updated toast shown: v${oldVersion} → v${newVersion}`);
 }
 
 async function showLocalDevToast(client: PluginClient, version: string): Promise<void> {
@@ -156,7 +164,7 @@ async function showLocalDevToast(client: PluginClient, version: string): Promise
       },
     })
     .catch(() => {});
-  console.log(`[auto-update-checker] Local dev toast shown: v${version}`);
+  debugLog(`[auto-update-checker] Local dev toast shown: v${version}`);
 }
 
 export type { UpdateCheckResult, AutoUpdateCheckerOptions } from "./types";

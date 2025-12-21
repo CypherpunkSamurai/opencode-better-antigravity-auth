@@ -1,6 +1,7 @@
-import { createWriteStream, type WriteStream } from "node:fs";
+import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
 import { join } from "node:path";
-import { cwd, env } from "node:process";
+import { homedir } from "node:os";
+import { env } from "node:process";
 
 const DEBUG_FLAG = env.OPENCODE_ANTIGRAVITY_DEBUG ?? "";
 const MAX_BODY_PREVIEW_CHARS = 12000;
@@ -202,11 +203,37 @@ function formatError(error: unknown): string {
 }
 
 /**
- * Builds a timestamped log file path in the current working directory.
+ * Returns the logs directory inside the opencode config folder.
+ * Creates the directory if it doesn't exist.
+ */
+function getLogsDir(): string {
+  const platform = process.platform;
+  let configDir: string;
+
+  if (platform === "win32") {
+    configDir = join(env.APPDATA || join(homedir(), "AppData", "Roaming"), "opencode");
+  } else {
+    const xdgConfig = env.XDG_CONFIG_HOME || join(homedir(), ".config");
+    configDir = join(xdgConfig, "opencode");
+  }
+
+  const logsDir = env.OPENCODE_ANTIGRAVITY_LOG_DIR || join(configDir, "antigravity-logs");
+
+  try {
+    mkdirSync(logsDir, { recursive: true });
+  } catch {
+    // Directory may already exist or we don't have permission
+  }
+
+  return logsDir;
+}
+
+/**
+ * Builds a timestamped log file path in the opencode logs directory.
  */
 function defaultLogFilePath(): string {
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return join(cwd(), `antigravity-debug-${timestamp}.log`);
+  return join(getLogsDir(), `antigravity-debug-${timestamp}.log`);
 }
 
 function createLogWriter(filePath?: string): (line: string) => void {
