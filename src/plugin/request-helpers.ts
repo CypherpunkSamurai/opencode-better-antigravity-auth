@@ -112,9 +112,38 @@ export function resolveThinkingConfig(
  */
 function isThinkingPart(part: Record<string, unknown>): boolean {
   return part.type === "thinking"
+    || part.type === "redacted_thinking"
     || part.type === "reasoning"
     || part.thinking !== undefined
     || part.thought === true;
+}
+
+/**
+ * Checks if a part has a signature field (thinking block signature).
+ * Used to detect foreign thinking blocks that might have unknown type values.
+ */
+function hasSignatureField(part: Record<string, unknown>): boolean {
+  return part.signature !== undefined || part.thoughtSignature !== undefined;
+}
+
+/**
+ * Checks if a part is a tool block (tool_use or tool_result).
+ * Tool blocks must never be filtered - they're required for tool call/result pairing.
+ * Handles multiple formats:
+ * - Anthropic: { type: "tool_use" }, { type: "tool_result", tool_use_id }
+ * - Nested: { tool_result: { tool_use_id } }, { tool_use: { id } }
+ * - Gemini: { functionCall }, { functionResponse }
+ */
+function isToolBlock(part: Record<string, unknown>): boolean {
+  return part.type === "tool_use"
+    || part.type === "tool_result"
+    || part.tool_use_id !== undefined
+    || part.tool_call_id !== undefined
+    || part.tool_result !== undefined
+    || part.tool_use !== undefined
+    || part.toolUse !== undefined
+    || part.functionCall !== undefined
+    || part.functionResponse !== undefined;
 }
 
 /**
@@ -122,11 +151,24 @@ function isThinkingPart(part: Record<string, unknown>): boolean {
  * Claude API requires that assistant messages don't end with thinking blocks.
  * Only removes unsigned thinking blocks; preserves those with valid signatures.
  */
-function removeTrailingThinkingBlocks(contentArray: any[]): any[] {
+function removeTrailingThinkingBlocks(
+  contentArray: any[],
+  sessionId?: string,
+  getCachedSignatureFn?: (sessionId: string, text: string) => string | undefined,
+): any[] {
   const result = [...contentArray];
-  while (result.length > 0 && isThinkingPart(result[result.length - 1]) && !hasValidSignature(result[result.length - 1])) {
+
+  while (result.length > 0 && isThinkingPart(result[result.length - 1])) {
+    const part = result[result.length - 1];
+    const isValid = sessionId && getCachedSignatureFn
+      ? isOurCachedSignature(part as Record<string, unknown>, sessionId, getCachedSignatureFn)
+      : hasValidSignature(part as Record<string, unknown>);
+    if (isValid) {
+      break;
+    }
     result.pop();
   }
+
   return result;
 }
 
@@ -222,7 +264,6 @@ function sanitizeThinkingPart(part: Record<string, unknown>): Record<string, unk
     const sanitized: Record<string, unknown> = { thought: true };
 
     if (part.text !== undefined) {
-      // If text is wrapped, extract the inner string.
       if (typeof part.text === "object" && part.text !== null) {
         const maybeText = (part.text as any).text;
         sanitized.text = typeof maybeText === "string" ? maybeText : part.text;
@@ -235,9 +276,9 @@ function sanitizeThinkingPart(part: Record<string, unknown>): Record<string, unk
     return sanitized;
   }
 
-  // Anthropic-style thinking blocks: { type: "thinking", thinking, signature }
-  if (part.type === "thinking" || part.thinking !== undefined) {
-    const sanitized: Record<string, unknown> = { type: "thinking" };
+  // Anthropic-style thinking/redacted_thinking blocks: { type: "thinking"|"redacted_thinking", thinking, signature }
+  if (part.type === "thinking" || part.type === "redacted_thinking" || part.thinking !== undefined) {
+    const sanitized: Record<string, unknown> = { type: part.type === "redacted_thinking" ? "redacted_thinking" : "thinking" };
 
     let thinkingContent: unknown = part.thinking ?? part.text;
     if (thinkingContent !== undefined && typeof thinkingContent === "object" && thinkingContent !== null) {
@@ -246,6 +287,23 @@ function sanitizeThinkingPart(part: Record<string, unknown>): Record<string, unk
     }
 
     if (thinkingContent !== undefined) sanitized.thinking = thinkingContent;
+    if (part.signature !== undefined) sanitized.signature = part.signature;
+    return sanitized;
+  }
+
+  // Reasoning blocks (OpenCode format): { type: "reasoning", text, signature }
+  if (part.type === "reasoning") {
+    const sanitized: Record<string, unknown> = { type: "reasoning" };
+
+    if (part.text !== undefined) {
+      if (typeof part.text === "object" && part.text !== null) {
+        const maybeText = (part.text as any).text;
+        sanitized.text = typeof maybeText === "string" ? maybeText : part.text;
+      } else {
+        sanitized.text = part.text;
+      }
+    }
+
     if (part.signature !== undefined) sanitized.signature = part.signature;
     return sanitized;
   }
@@ -267,7 +325,15 @@ function filterContentArray(
       continue;
     }
 
-    if (!isThinkingPart(item)) {
+    if (isToolBlock(item)) {
+      filtered.push(item);
+      continue;
+    }
+
+    const isThinking = isThinkingPart(item);
+    const hasSignature = hasSignatureField(item);
+
+    if (!isThinking && !hasSignature) {
       filtered.push(item);
       continue;
     }
@@ -299,9 +365,9 @@ function filterContentArray(
 }
 
 /**
- * Filters out unsigned thinking blocks from contents (required by Claude API).
- * Attempts to restore signatures from cache for thinking blocks that lack valid signatures.
- * 
+ * Filters thinking blocks from contents unless the signature matches our cache.
+ * Attempts to restore signatures from cache for thinking blocks that lack signatures.
+ *
  * @param contents - The contents array from the request
  * @param sessionId - Optional session ID for signature cache lookup
  * @param getCachedSignatureFn - Optional function to retrieve cached signatures
@@ -318,26 +384,35 @@ export function filterUnsignedThinkingBlocks(
 
     // Gemini format: contents[].parts[]
     if (Array.isArray((content as any).parts)) {
-      let filteredParts = filterContentArray((content as any).parts, sessionId, getCachedSignatureFn);
+      const filteredParts = filterContentArray(
+        (content as any).parts,
+        sessionId,
+        getCachedSignatureFn,
+      );
 
       // Remove trailing thinking blocks for model role (assistant equivalent in Gemini)
-      if ((content as any).role === "model") {
-        filteredParts = removeTrailingThinkingBlocks(filteredParts);
-      }
+      const trimmedParts = (content as any).role === "model"
+        ? removeTrailingThinkingBlocks(filteredParts, sessionId, getCachedSignatureFn)
+        : filteredParts;
 
-      return { ...content, parts: filteredParts };
+      return { ...content, parts: trimmedParts };
     }
 
     // Some Anthropic-style payloads may appear here as contents[].content[]
     if (Array.isArray((content as any).content)) {
-      let filteredContent = filterContentArray((content as any).content, sessionId, getCachedSignatureFn);
+      const isAssistantRole = (content as any).role === "assistant";
+      const filteredContent = filterContentArray(
+        (content as any).content,
+        sessionId,
+        getCachedSignatureFn,
+      );
 
       // Claude API requires assistant messages don't end with thinking blocks
-      if ((content as any).role === "assistant") {
-        filteredContent = removeTrailingThinkingBlocks(filteredContent);
-      }
+      const trimmedContent = isAssistantRole
+        ? removeTrailingThinkingBlocks(filteredContent, sessionId, getCachedSignatureFn)
+        : filteredContent;
 
-      return { ...content, content: filteredContent };
+      return { ...content, content: trimmedContent };
     }
 
     return content;
@@ -345,7 +420,7 @@ export function filterUnsignedThinkingBlocks(
 }
 
 /**
- * Filters thinking blocks from Anthropic-style messages[] payloads.
+ * Filters thinking blocks from Anthropic-style messages[] payloads using cached signatures.
  */
 export function filterMessagesThinkingBlocks(
   messages: any[],
@@ -358,18 +433,71 @@ export function filterMessagesThinkingBlocks(
     }
 
     if (Array.isArray((message as any).content)) {
-      let filteredContent = filterContentArray((message as any).content, sessionId, getCachedSignatureFn);
+      const isAssistantRole = (message as any).role === "assistant";
+      const filteredContent = filterContentArray(
+        (message as any).content,
+        sessionId,
+        getCachedSignatureFn,
+      );
 
       // Claude API requires assistant messages don't end with thinking blocks
-      if ((message as any).role === "assistant") {
-        filteredContent = removeTrailingThinkingBlocks(filteredContent);
-      }
+      const trimmedContent = isAssistantRole
+        ? removeTrailingThinkingBlocks(filteredContent, sessionId, getCachedSignatureFn)
+        : filteredContent;
 
-      return { ...message, content: filteredContent };
+      return { ...message, content: trimmedContent };
     }
 
     return message;
   });
+}
+
+export function deepFilterThinkingBlocks(
+  payload: unknown,
+  sessionId?: string,
+  getCachedSignatureFn?: (sessionId: string, text: string) => string | undefined,
+): unknown {
+  const visited = new WeakSet<object>();
+
+  const walk = (value: unknown): void => {
+    if (!value || typeof value !== "object") {
+      return;
+    }
+
+    if (visited.has(value as object)) {
+      return;
+    }
+
+    visited.add(value as object);
+
+    if (Array.isArray(value)) {
+      value.forEach((item) => walk(item));
+      return;
+    }
+
+    const obj = value as Record<string, unknown>;
+
+    if (Array.isArray(obj.contents)) {
+      obj.contents = filterUnsignedThinkingBlocks(
+        obj.contents as any[],
+        sessionId,
+        getCachedSignatureFn,
+      );
+    }
+
+    if (Array.isArray(obj.messages)) {
+      obj.messages = filterMessagesThinkingBlocks(
+        obj.messages as any[],
+        sessionId,
+        getCachedSignatureFn,
+      );
+    }
+
+    Object.keys(obj).forEach((key) => walk(obj[key]));
+  };
+
+  walk(payload);
+  return payload;
 }
 
 /**

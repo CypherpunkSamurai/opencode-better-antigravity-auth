@@ -6,6 +6,7 @@ import {
   resolveThinkingConfig,
   filterUnsignedThinkingBlocks,
   filterMessagesThinkingBlocks,
+  deepFilterThinkingBlocks,
   transformThinkingParts,
   normalizeThinkingConfig,
   parseAntigravityApiBody,
@@ -117,7 +118,7 @@ describe("sanitizeThinkingPart (covered via filtering)", () => {
     });
   });
 
-  it("falls back to recursive stripping for signed reasoning blocks and removes nested SDK fields", () => {
+  it("sanitizes reasoning blocks keeping only allowed fields (type, text, signature)", () => {
     const validSignature = "z".repeat(60);
     const getCachedSignatureFn = (_sessionId: string, _text: string) => validSignature;
 
@@ -131,14 +132,7 @@ describe("sanitizeThinkingPart (covered via filtering)", () => {
             signature: validSignature,
             cache_control: { type: "ephemeral" },
             providerOptions: { injected: true },
-            meta: {
-              keep: true,
-              cache_control: { nested: true },
-              arr: [
-                { providerOptions: { nested: true }, keep: 1 },
-                { cache_control: { nested: true }, keep: 2 },
-              ],
-            },
+            meta: { keep: true },
           },
           { type: "text", text: "visible" },
         ],
@@ -150,13 +144,6 @@ describe("sanitizeThinkingPart (covered via filtering)", () => {
       type: "reasoning",
       text: "reasoning text",
       signature: validSignature,
-      meta: {
-        keep: true,
-        arr: [
-          { keep: 1 },
-          { keep: 2 },
-        ],
-      },
     });
   });
 });
@@ -421,6 +408,22 @@ describe("filterUnsignedThinkingBlocks", () => {
     expect(result).toEqual(contents);
   });
 
+  it("strips blocks with signature field even if type is unknown", () => {
+    const foreignSignature = "x".repeat(60);
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          { type: "unknown_thinking_type", text: "foreign block", signature: foreignSignature },
+          { type: "text", text: "visible" },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].type).toBe("text");
+  });
+
   it("handles empty parts array", () => {
     const contents = [{ role: "model", parts: [] }];
     const result = filterUnsignedThinkingBlocks(contents);
@@ -432,6 +435,98 @@ describe("filterUnsignedThinkingBlocks", () => {
     const result = filterUnsignedThinkingBlocks(contents);
     expect(result).toEqual(contents);
   });
+
+  it("preserves tool_use and tool_result blocks intact", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          { type: "tool_use", id: "tool_123", name: "bash", input: { command: "ls" } },
+        ],
+      },
+      {
+        role: "user",
+        parts: [
+          { type: "tool_result", tool_use_id: "tool_123", content: "file1.txt" },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents);
+    expect(result[0].parts[0]).toEqual({ type: "tool_use", id: "tool_123", name: "bash", input: { command: "ls" } });
+    expect(result[1].parts[0]).toEqual({ type: "tool_result", tool_use_id: "tool_123", content: "file1.txt" });
+  });
+
+  it("preserves tool blocks even if they have signature-like fields", () => {
+    const contents = [
+      {
+        role: "user",
+        parts: [
+          { type: "tool_result", tool_use_id: "tool_456", content: "result", signature: "some_random_value" },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].tool_use_id).toBe("tool_456");
+  });
+
+  it("preserves nested tool_result format", () => {
+    const contents = [
+      {
+        role: "user",
+        parts: [
+          { tool_result: { tool_use_id: "tool_789", content: "nested result" } },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents);
+    expect(result[0].parts).toHaveLength(1);
+    expect(result[0].parts[0].tool_result.tool_use_id).toBe("tool_789");
+  });
+
+  it("preserves functionCall and functionResponse blocks", () => {
+    const contents = [
+      {
+        role: "model",
+        parts: [
+          { functionCall: { name: "get_weather", args: { city: "NYC" } } },
+        ],
+      },
+      {
+        role: "function",
+        parts: [
+          { functionResponse: { name: "get_weather", response: { temp: 72 } } },
+        ],
+      },
+    ];
+    const result = filterUnsignedThinkingBlocks(contents);
+    expect(result[0].parts[0].functionCall).toBeDefined();
+    expect(result[1].parts[0].functionResponse).toBeDefined();
+  });
+});
+
+describe("deepFilterThinkingBlocks", () => {
+  it("removes nested thinking blocks in extra_body messages", () => {
+    const payload = {
+      extra_body: {
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "foreign", signature: "x".repeat(60) },
+              { type: "text", text: "visible" },
+            ],
+          },
+        ],
+      },
+    };
+
+    deepFilterThinkingBlocks(payload);
+    const filtered = (payload as any).extra_body.messages[0].content;
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].type).toBe("text");
+  });
+
 });
 
 describe("filterMessagesThinkingBlocks", () => {
