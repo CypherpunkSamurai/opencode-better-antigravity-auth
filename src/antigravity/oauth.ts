@@ -210,6 +210,9 @@ export async function exchangeAntigravity(
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": ANTIGRAVITY_HEADERS["User-Agent"],
+        "X-Goog-Api-Client": ANTIGRAVITY_HEADERS["X-Goog-Api-Client"],
+        "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
       },
       body: new URLSearchParams({
         client_id: ANTIGRAVITY_CLIENT_ID,

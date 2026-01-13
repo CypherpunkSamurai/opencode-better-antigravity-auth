@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "../constants";
+import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET, ANTIGRAVITY_HEADERS } from "../constants";
 import { formatRefreshParts, parseRefreshParts, calculateTokenExpiry } from "./auth";
 import { clearCachedAuth, storeCachedAuth } from "./cache";
 import { createLogger } from "./logger";
@@ -98,6 +98,9 @@ export async function refreshAccessToken(
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": ANTIGRAVITY_HEADERS["User-Agent"],
+        "X-Goog-Api-Client": ANTIGRAVITY_HEADERS["X-Goog-Api-Client"],
+        "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
