@@ -3,6 +3,7 @@ import {
   ANTIGRAVITY_ENDPOINT_FALLBACKS,
   ANTIGRAVITY_LOAD_ENDPOINTS,
   ANTIGRAVITY_DEFAULT_PROJECT_ID,
+  GEMINI_CLI_HEADERS,
 } from "../constants";
 import { formatRefreshParts, parseRefreshParts } from "./auth";
 import { createLogger } from "./logger";
@@ -142,8 +143,8 @@ export async function loadManagedProject(
   const loadHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     Authorization: `Bearer ${accessToken}`,
-    "User-Agent": "google-api-nodejs-client/9.15.1",
-    "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
+    "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+    "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
     "Client-Metadata": ANTIGRAVITY_HEADERS["Client-Metadata"],
   };
 
