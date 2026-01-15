@@ -2007,8 +2007,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
   };
 };
 
-export const AntigravityCLIOAuthPlugin = createAntigravityPlugin(ANTIGRAVITY_PROVIDER_ID);
-export const GoogleOAuthPlugin = AntigravityCLIOAuthPlugin;
+export const AntigravityCLIOAuthPlugin: (context: PluginContext) => Promise<PluginResult> = createAntigravityPlugin(ANTIGRAVITY_PROVIDER_ID);
+export const GoogleOAuthPlugin: (context: PluginContext) => Promise<PluginResult> = AntigravityCLIOAuthPlugin;
 
 function toUrlString(value: RequestInfo): string {
   if (typeof value === "string") {
