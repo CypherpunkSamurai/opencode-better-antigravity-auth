@@ -1,4 +1,4 @@
-import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET } from "../constants";
+import { ANTIGRAVITY_CLIENT_ID, ANTIGRAVITY_CLIENT_SECRET, GEMINI_CLI_HEADERS } from "../constants";
 import { formatRefreshParts, parseRefreshParts, calculateTokenExpiry } from "./auth";
 import { clearCachedAuth, storeCachedAuth } from "./cache";
 import { createLogger } from "./logger";
@@ -97,7 +97,11 @@ export async function refreshAccessToken(
     const response = await fetch("https://oauth2.googleapis.com/token", {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "*/*",
+          "Accept-Encoding": "gzip, deflate, br",
+          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+          "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+          "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
       },
       body: new URLSearchParams({
         grant_type: "refresh_token",
